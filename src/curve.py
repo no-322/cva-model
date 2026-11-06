@@ -10,7 +10,9 @@ Stubs only. Fill these in yourself.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
+
+from datetime import datetime
 
 SPOT = date(2026, 10, 19)  # t = 0 for every DF in this module
 
@@ -30,6 +32,19 @@ def schedule(start: date, years: int) -> tuple[list[date], list[float]]:
     -------
     (dates, dts) : ([t_1, ..., t_n], [Δt_1, ..., Δt_n])
     """
+    dates = [start.replace(year = start.year + i + 1) for i in range(years)]
+    for i,d in enumerate(dates):
+        if d.weekday() == 5:
+            dates[i] += timedelta(days = 2) if (d + timedelta(days = 2)).month == d.month else timedelta(days = -1)
+        elif d.weekday() == 6:
+            dates[i] += timedelta(days = 1) if (d + timedelta(days = 1)).month == d.month else timedelta(days = -2)
+    dt = []
+    for i,d in enumerate(dates[1:]):
+        dt.append((d - dates[i]).days/ 360)
+    dt = [(dates[0]- start).days/360] + dt
+
+    
+    return (dates, dt)     
     raise NotImplementedError
 
 
