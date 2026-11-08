@@ -39,3 +39,11 @@
 ### Note: Bloomberg rounding
 
 - Bloomberg rounds its DF to 6 decimals. Since we are using \$100M notional, no implementation can beat $10^{-6} \times$ \$100M = \$100 rounding error.
+- We assume bootstrapping dates are continuous.
+
+## Swaps
+
+- Assume that start and end are the same date and month; only the year changes.
+- Although payment dates run from 2027, we store dates from 2026 because we need it to calculate the forward rate.
+- In interest rate swaps the floating leg (when constructed off the SOFR curve) is a telescoping sum and cancels out. So Floating leg = $1 - DF(0, T_n)$. But in our code we consider the fact that payment date and accrual date are different. So they don't cancel out.
+- Compared to Bloomberg SWPM, year 2 and 3 values are off; this is because we didn't bootstrap the 18M values. Despite this, NPV comes out right (thanks to the telescoping property).

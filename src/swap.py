@@ -9,15 +9,19 @@ Notation (Sorets MF728/MF772):
     F_i          forward SOFR rate for period i
     N, K         notional, fixed rate
 
-Stubs only. Fill these in yourself.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Callable
 
+import pandas as pd
+
+from src.curve import schedule
+
+CURVE_DATE = date(2026, 10, 15)
 
 @dataclass
 class SwapSpec:
@@ -51,7 +55,23 @@ def leg_schedule(spec: SwapSpec) -> tuple[list[date], list[date], list[float]]:
     -------
     (s, p, dts) : ([s_0, ..., s_n], [p_1, ..., p_n], [Δ_1, ..., Δ_n])
     """
-    raise NotImplementedError
+    start = spec.effective
+    end = spec.maturity
+    years = - start.year + end.year
+    accrualDates, dt = schedule(start= start, years= years)
+    accrualDates = [start] + accrualDates
+    paymentDates = []
+
+    for s in accrualDates[1:]:
+        flag = spec.pay_delay_bd
+        p = s
+        while flag!=0:
+          p += timedelta(days = 1)
+          if p.weekday() <5:
+              flag-=1
+        paymentDates.append(p)            
+
+    return (accrualDates, paymentDates, dt)
 
 
 def swap_pv(
@@ -92,7 +112,32 @@ def swap_pv(
                  fwd_rate, float_payment, df, pv
                  (payments unsigned; pv is the signed net PV of that row)
     """
-    raise NotImplementedError
+    accrualDates, paymentDates, dt = leg_schedule(spec)
+    pv_fixed = 0
+    pv_float = 0
+    sign = 1 if spec.receive_fixed else -1
+    rows = []
+
+    for i in range(len(paymentDates)):
+      fixedLeg = spec.notional * spec.fixed_rate * dt[i]
+      forwardRate = (1/ dt[i]) * ((curve(accrualDates[i]) * df_spot_to_curve if accrualDates[i] > CURVE_DATE else 1) / (curve(accrualDates[i+1]) * df_spot_to_curve) - 1)
+      floatingLeg = spec.notional * forwardRate * dt[i]
+      disc = curve(paymentDates[i]) if val_date != CURVE_DATE else curve(paymentDates[i]) * df_spot_to_curve
+      pv_fixed += fixedLeg * disc
+      pv_float += floatingLeg * disc
+      rows.append({
+          "accrual_start": accrualDates[i], "accrual_end": accrualDates[i+1],
+          "pay_date": paymentDates[i], "dcf": dt[i],
+          "fixed_payment": fixedLeg, "fwd_rate": forwardRate, "float_payment": floatingLeg,
+          "df": disc,
+          "pv": sign * (fixedLeg - floatingLeg) * disc,
+      })
+
+    if spec.receive_fixed is True:
+      pv = pv_fixed - pv_float
+    else: pv = - (pv_fixed - pv_float)
+
+    return {"pv_fixed": pv_fixed, "pv_float": pv_float, "pv": pv, "rows": pd.DataFrame(rows)}
 
 
 def dv01(spec: SwapSpec, quotes: dict[int | str, float]) -> float:
