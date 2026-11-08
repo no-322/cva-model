@@ -60,3 +60,11 @@ def test_vs_bloomberg(nodes, curve_df, n):
     bbg = curve_df.set_index("tenor").loc[f"{n}Y", "bbg_df"] / BBG_SPOT_DF
     t_n = schedule(SPOT, n)[0][-1]
     assert df(t_n) == pytest.approx(bbg, abs=1e-5)
+
+
+def test_df_3m(curve_df):
+    from src.data import short_quotes
+    bootstrap({**short_quotes(curve_df), **swap_quotes(curve_df, TENORS)})
+    t_3m = date(2027, 1, 19)  # 2027-01-19 is a Tuesday, no adjustment needed
+    bbg = curve_df.set_index("tenor").loc["3M", "bbg_df"] / BBG_SPOT_DF
+    assert df(t_3m) == pytest.approx(bbg, abs=1e-5)

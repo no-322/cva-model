@@ -23,9 +23,19 @@
 
 ### Note: Swap mechanism
 
-- Swaps settle on T+2. The settlement date is called the swap date.
+- Swaps settle on T+2. The settlement date is called the spot date.
 - We downloaded data on Oct 15 (Thu). Settlement is Oct 19 (Mon).
 - We assume a constant discount rate between Oct 15 and 19.
 - Day count convention used is ACT/360.
 - We use modified following to calculate the payment dates (useful when the date falls on a weekend, a weekend that is also the last 1–2 days of the month).
 
+### Note: Less than a year
+
+- When bootstrapping, we don't bootstrap less than a year because there is no coupon provided.
+- Those are considered as individual discount factors.
+- \$1 invested in SOFR remains \$1. Coupons are provided so as to maintain its invested value.
+- If we don't add less than a year to bootstrap, then there are no nodes there and cashflows there are a guess. This is where CVA starts as well.
+
+### Note: Bloomberg rounding
+
+- Bloomberg rounds its DF to 6 decimals. Since we are using \$100M notional, no implementation can beat $10^{-6} \times$ \$100M = \$100 rounding error.

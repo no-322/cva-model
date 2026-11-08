@@ -27,3 +27,14 @@ def test_swap_quotes_keys(curve_df):
     q = swap_quotes(curve_df)
     assert list(q) == list(range(1, 11))
     assert q[10] == pytest.approx(0.046792, abs=1e-12)
+
+
+def test_swpm_cashflows():
+    from src.data import load_swpm_cashflows
+    cf = load_swpm_cashflows()
+    assert all(len(cf[k]) == 10 for k in ("fixed", "float", "net"))
+    assert cf["net"]["pv"].sum() == pytest.approx(-1_404_200.87, abs=0.01)
+    for leg in ("fixed", "float"):
+        f = cf[leg]
+        assert ((f["coupon"] + f["principal"]) - f["payment"]).abs().max() < 1e-6
+    assert cf["fixed"]["coupon"].iloc[0] == pytest.approx(4_563_853.54, abs=0.01)

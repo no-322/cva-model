@@ -1,4 +1,5 @@
 I'm learning this for interviews. Use Prof. Sorets' MF728/MF772 notation.
+Write discount factors as DF(0, t), not P(0, t).
 Never write function bodies in src/ unless I explicitly ask. When I'm stuck,
 give a hint first, then a bigger hint. Review my code and point out bugs
 without fixing them. You may write data loading, tests and plots.

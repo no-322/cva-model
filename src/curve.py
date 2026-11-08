@@ -1,20 +1,23 @@
 """SOFR discount curve: schedule, bootstrap, interpolation.
 
 Notation (Sorets MF728/MF772):
-    P(0, t)  discount factor from spot 0 to t
-    Δt_i     accrual fraction of period i, ACT/360
-    S_n      par fixed rate of the n-year annual swap
-
-Stubs only. Fill these in yourself.
+    DF(0, t)  discount factor from spot 0 to t
+    Δt_i      accrual fraction of period i, ACT/360
+    S_n       par fixed rate of the n-year annual swap
+    A_n       annuity Σ_{i=1..n} Δt_i DF(0, t_i)
 """
 
 from __future__ import annotations
 
+import math
+from bisect import bisect_right
 from datetime import date, timedelta
 
-from datetime import datetime
-
 SPOT = date(2026, 10, 19)  # t = 0 for every DF in this module
+
+# Curve nodes {t: DF(0, t)}. bootstrap() fills it, df() reads it, because
+# df(t) has no curve argument.
+_NODES: dict[date, float] = {}
 
 
 def schedule(start: date, years: int) -> tuple[list[date], list[float]]:
@@ -42,38 +45,93 @@ def schedule(start: date, years: int) -> tuple[list[date], list[float]]:
     for i,d in enumerate(dates[1:]):
         dt.append((d - dates[i]).days/ 360)
     dt = [(dates[0]- start).days/360] + dt
-
-    
-    return (dates, dt)     
-    raise NotImplementedError
+    return (dates, dt)
 
 
-def bootstrap(quotes: dict[int, float]) -> dict[date, float]:
-    """Bootstrap discount factors from annual par swap quotes.
+def bootstrap(quotes: dict[int | str, float]) -> dict[date, float]:
+    """Bootstrap discount factors from par SOFR swap quotes.
 
     Parameters
     ----------
-    quotes : {n: S_n}, n = 1..10, S_n in decimal (see src.data.swap_quotes)
+    quotes : S in decimal, keyed two ways (can be mixed in one dict):
+        int n     annual swap, n = 1..N consecutive (src.data.swap_quotes)
+        '1W'..'11M'  sub-1Y swap (src.data.short_quotes)
 
-    Each quote is priced at par: its fixed leg PV equals its floating leg PV, i.e.
-        S_n · Σ_{i=1..n} Δt_i P(0, t_i) = 1 − P(0, t_n)
-    Solve for each P(0, t_n) in turn.
+    Annual quotes: each is priced at par, fixed leg PV = floating leg PV:
+        S_n · Σ_{i=1..n} Δt_i DF(0, t_i) = 1 − DF(0, t_n)
+    Pulling the last term out of the sum and solving:
+        DF(0, t_n) = (1 − S_n A_{n−1}) / (1 + S_n Δt_n)
+
+    Short quotes (1W..11M): a single payment at maturity T, no intermediate coupons:
+        DF(0, T) = 1 / (1 + C_T · Δ(0, T))
+      - T = SPOT + n weeks (W) or n calendar months (M), then modified following
+      - Δ(0, T) = (T − SPOT).days / 360   (ACT/360 from 10/19)
+      - each one stands alone: it doesn't need any other node
+      - store them in the same DF dict as the annual nodes
+      Check: 1W -> 2026-10-26, Δ = 7/360;  3M -> 2027-01-19.
+
+    Also stores the nodes so df() can interpolate between them.
 
     Returns
     -------
-    {t_n: P(0, t_n)} measured from SPOT = 2026-10-19
+    {t: DF(0, t)} measured from SPOT = 2026-10-19
     """
-    raise NotImplementedError
+    short = {k: v for k, v in quotes.items() if isinstance(k, str)}
+    quotes = dict(sorted((k, v) for k, v in quotes.items() if isinstance(k, int)))
+    if list(quotes) != list(range(1, len(quotes) + 1)):
+        raise ValueError("need consecutive annual quotes 1Y..NY")
+    dates, dt = schedule(SPOT, max(quotes.keys()))
+    Annuity = 0.0  # A_{n-1}
+    DF = {}
+    for n, S_n in quotes.items():
+        DF[dates[n-1]] = (1 - S_n * Annuity) / (1 + S_n * dt[n-1])
+        Annuity += dt[n-1] * DF[dates[n-1]]
+
+    # ---------- short end (1W..11M)----------
+    # For each tenor in `short`: find T, compute Δ(0, T), store DF[T].
+    # See the docstring for the rules.
+    if short:
+        for p, S_n in short.items():
+            toMove, granularity = int(p[:-1]), p[-1]
+            if granularity == 'W':
+                d = SPOT + timedelta(weeks= toMove)
+            else:
+                m = SPOT.month - 1 + toMove   # months counted from January, 0-based
+                d = SPOT.replace(year = SPOT.year + m // 12, month = m % 12 + 1)
+
+            if d.weekday() == 5:
+                d += timedelta(days = 2) if (d + timedelta(days = 2)).month == d.month else timedelta(days = -1)
+            elif d.weekday() == 6:
+                d += timedelta(days = 1) if (d + timedelta(days = 1)).month == d.month else timedelta(days = -2)
+            
+            delta = (d - SPOT).days/360
+            DF[d] = 1 / (1 + S_n * delta)
+
+        
+    _NODES.clear()
+    _NODES.update(DF)
+    return DF
 
 
 def df(t: date) -> float:
-    """P(0, t) by log-linear interpolation of DF between bootstrapped nodes.
+    """DF(0, t) by log-linear interpolation of DF between bootstrapped nodes.
 
-    P(0, SPOT) = 1.
+    DF(0, SPOT) = 1. Between nodes, log DF is linear in calendar days, which
+    means the forward rate is flat on each segment. Beyond the last node, the
+    last segment's flat forward is extended.
 
-    Design note: this signature takes no curve argument, so it has to read the
-    nodes from somewhere, e.g. state stored by `bootstrap`. Decide whether you
-    want that, or a `df(t, curve)` / Curve-class design instead. If you change
-    the signature, update tests/test_curve.py to match.
+    Reads the nodes stored by the most recent bootstrap() call.
     """
-    raise NotImplementedError
+    if not _NODES:
+        raise RuntimeError("call bootstrap() first")
+    if t < SPOT:
+        raise ValueError(f"{t} is before spot {SPOT}")
+
+    ts = [SPOT] + sorted(_NODES)
+    xs = [(d - SPOT).days for d in ts]
+    logs = [0.0] + [math.log(_NODES[d]) for d in ts[1:]]
+
+    x = (t - SPOT).days
+    k = min(bisect_right(xs, x), len(xs) - 1)  # segment is [xs[k-1], xs[k]]
+    w = (x - xs[k-1]) / (xs[k] - xs[k-1])
+    return math.exp(logs[k-1] + w * (logs[k] - logs[k-1]))
