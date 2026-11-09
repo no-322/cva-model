@@ -47,3 +47,45 @@
 - Although payment dates run from 2027, we store dates from 2026 because we need it to calculate the forward rate.
 - In interest rate swaps the floating leg (when constructed off the SOFR curve) is a telescoping sum and cancels out. So Floating leg = $1 - DF(0, T_n)$ (per unit notional, for a swap starting at spot). For the Oracle swap starting 10/15 it is $DF_c(s_0) - DF_c(s_n)$. But in our code we consider the fact that payment date and accrual date are different. So they don't cancel out.
 - Compared to Bloomberg SWPM, year 2 and 3 values are off; this is because we didn't bootstrap the 18M values. Despite this, NPV comes out right (thanks to the telescoping property). The wrong DF at 2028-10-16 pushes the year 2 and year 3 forwards in opposite directions, so they nearly cancel. Not exactly, because of the pay delay.
+
+### 2 ways to see DV01 of a bond
+
+- From a derivatives perspective we write it as $PV_{bumped} - PV$. But since DV01 is sensitivity to rate changes, in order to maintain duration conventions (i.e. -ve value change) we will use $PV_{bumped} - PV$
+- DV01 of payer and receiver are the same magnitude, opposite in sign.
+- If payment was made on accrual date, the positive position becomes more positive and negative position becomes more negative (i.e. both reduce in magnitude)
+- At par DV01 can be estimated as $-N A \frac{dS}{dr}$. If it is not at par we need to add adjustment of $N (K-S) \frac{dA}{dr}$, i.e. for off-market swaps a rate shift moves the annuity too.
+- A receiver swap has approx the same DV01 as a long term bond cuz a receiver swap can be thought of as longing a bond and shorting a floater. A floater has no rate risk so almost all of rate risk comes from the bond.
+
+## Hull–White
+
+- Short rates are not observable. Limit of forward rate is the short rate.
+- Taking $E^Q$[forward rate] from $(t, T)$ doesn't give short rate, but it does under the forward measure.
+- The problem with HW1F is that it models rates with unrealistically high correlation.
+- We use Hull–White instead of Vasicek because the reverting mean level can vary with time. This degree of freedom lets us model the whole curve.
+- We use convention ACT/365 here (compared to ACT/360 for bootstrapping and schedule build).
+- Hull–White can be decomposed as $\alpha(t) + x(t)$. $x(t)$ is a mean 0, mean-reverting random process. $\alpha(t)$ = forward + convexity correction.
+
+### Q: Why does $\theta_t$ blow up? Do the numbers, then say whether $\theta_t$ is even defined for this curve.
+
+- $\theta_t$ depends on the derivative $\partial f/\partial t$ and this blows up at the nodes for a bootstrapped curve. So $\theta_t$ isn't properly defined at the nodes but is an ordinary function elsewhere (and $\partial f/\partial t = 0$).
+- Note that the size of the spike is just an artifact. The width of time step $h$ determines the spike.
+
+### Q: Why is there only one spike when the curve has about 20 nodes? What would that mean if you simulated with $\theta_t$?
+
+- It's pure coincidence. It depends on where the nodes land. If the node is part of the pts used to calculate $\partial f/\partial t$ then we will see a spike at those points.
+
+### Q: Why is $\alpha(t)$ above $f(0,t)$, with the gap growing over time?
+
+- It is due to Jensen's inequality. $E[e^{-rt}] \ge e^{E[-rt]}$ and the gap keeps growing with $t$.
+
+### Q: Why simulate with $x_t + \alpha(t)$ rather than $\theta_t$?
+
+- It's because as we saw $\theta_t$ needs calculation of $\partial f/\partial t$. It is computationally expensive and sometimes unstable. $x_t$ also doesn't contain discretization error but if we use $\theta_t$ we get discretization error as well.
+
+### Q: Why Hull–White rather than Vasicek for pricing?
+
+- Vasicek has only 3 parameters. It won't be able to fit the entire forward curve. HW1F has time-varying $\theta$ as a param and hence can fit the entire curve.
+
+### Q: Rates can go negative in Hull–White. Does that matter for CVA on a swap?
+
+- Rates can go negative (e.g. EUR and JPY), so HW1F makes sense. For a receiver swaption value increases when rates fall, ignoring negative rates makes us underestimate expected exposure. At the same time using HW1F causes the short rates to be a Gaussian around $\alpha(t)$ and this probability > real-world probability. We will know which model is true representation only when we consider deep receiver swaps. Since we use only ATM this is not inferred.

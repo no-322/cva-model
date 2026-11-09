@@ -135,3 +135,51 @@ def df(t: date) -> float:
     k = min(bisect_right(xs, x), len(xs) - 1)  # segment is [xs[k-1], xs[k]]
     w = (x - xs[k-1]) / (xs[k] - xs[k-1])
     return math.exp(logs[k-1] + w * (logs[k] - logs[k-1]))
+
+
+# ---------- year-fraction versions, for Hull–White ----------
+# HW works in t = years from SPOT, ACT/365 (a float, not a date).
+# A node on date d sits at τ = (d − SPOT).days / 365.
+
+
+def df_years(t: float) -> float:
+    """DF(0, t) with t in years ACT/365 from SPOT = 2026-10-19.
+
+    Same log-linear interpolation as df(), but on τ = days/365 instead of
+    dates, so t doesn't have to land on a whole day (e.g. t = 0.25).
+    DF(0, 0) = 1. Beyond the last node, extend the last segment.
+
+    Check: for any date d, df_years((d − SPOT).days / 365) == df(d).
+    """
+    if not _NODES:
+            raise RuntimeError("call bootstrap() first")
+    if t < 0:
+            raise ValueError(f"{t} is before spot {SPOT}")
+    
+    ts = [SPOT] + sorted(_NODES)
+    xs = [(d - SPOT).days / 365 for d in ts]
+    logs = [0.0] + [math.log(_NODES[d]) for d in ts[1:]]
+    x = t
+    k = min(bisect_right(xs, x), len(xs) - 1)  # segment is [xs[k-1], xs[k]]
+    w = (x - xs[k-1]) / (xs[k] - xs[k-1])
+    return math.exp(logs[k-1] + w * (logs[k] - logs[k-1]))
+
+
+def forward(t: float) -> float:
+    """Instantaneous forward f(0, t) = −∂/∂t log DF(0, t).
+
+    t in years ACT/365 from SPOT = 2026-10-19.
+
+    With log-linear DF, log DF is a straight line on each segment
+    [τ_{k−1}, τ_k], so f is constant there:
+        f(0, t) = −(log DF(0, τ_k) − log DF(0, τ_{k−1})) / (τ_k − τ_{k−1})
+
+    Right-continuous at nodes: at t = τ_k use the segment that starts at τ_k.
+    Beyond the last node, use the last segment's value.
+    """
+    ts = [SPOT] + sorted(_NODES)
+    xs = [(d - SPOT).days / 365 for d in ts]
+    logs = [0.0] + [math.log(_NODES[d]) for d in ts[1:]]
+    x = t
+    k = min(bisect_right(xs, x), len(xs) - 1)
+    return - (logs[k] - logs [k - 1]) / (xs[k] - xs[k - 1])

@@ -19,7 +19,8 @@ from typing import Callable
 
 import pandas as pd
 
-from src.curve import schedule
+from src import curve
+from src.curve import schedule, bootstrap, df
 
 CURVE_DATE = date(2026, 10, 15)
 
@@ -147,9 +148,13 @@ def dv01(spec: SwapSpec, quotes: dict[int | str, float]) -> float:
 
     Receive-fixed: rates up -> PV down, so DV01 > 0. Pay-fixed: DV01 < 0,
     which is also how Bloomberg SWPM shows it.
-
-    Careful: curve.df() reads the nodes from the LAST bootstrap() call.
-    Re-bootstrap the base quotes before you return, or everything priced
-    afterwards uses the bumped curve.
     """
-    raise NotImplementedError
+
+    bumpedQuotes = {}
+    for k, v in quotes.items():
+       bumpedQuotes[k] = v + 0.0001
+    bootstrap(bumpedQuotes)
+    swapBumped = swap_pv(spec, df)
+    bootstrap(quotes)
+    swap = swap_pv(spec, df)
+    return swap['pv'] - swapBumped['pv']
